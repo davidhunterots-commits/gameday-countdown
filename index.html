@@ -238,6 +238,16 @@
     color:var(--chalk-dim);
     margin:0 0 14px;
   }
+  .editing-banner{
+    font-family:'Inter',sans-serif;
+    font-size:12px;
+    color:#0B0D0F;
+    background:var(--accent);
+    border-radius:8px;
+    padding:8px 12px;
+    margin:-4px 0 16px;
+    font-weight:600;
+  }
   .field{margin-bottom:16px;}
   .field:last-child{margin-bottom:0;}
   label{
@@ -468,8 +478,9 @@
     <p class="kickoff-line">Kickoff <strong id="kickoffReadable">Sat, Sep 20 · 3:30 PM</strong></p>
   </div>
 
-  <div class="panel">
-    <h2>Set the Matchup</h2>
+  <div class="panel" id="matchupPanel">
+    <h2 id="matchupHeading">Set the Matchup</h2>
+    <p class="editing-banner" id="editingBanner" style="display:none;"></p>
     <div class="field">
       <label for="teamSelect">Team</label>
       <select id="teamSelect"></select>
@@ -645,6 +656,8 @@
     // wash out against the chip background
     const dot = document.querySelector(".team-chip .dot");
     dot.style.border = luminance(accent) > 0.7 ? "1px solid rgba(255,255,255,0.6)" : "1px solid rgba(255,255,255,0.3)";
+
+    if(state.editingId) updateAddButtonLabel();
   }
 
   function hexToRgbArr(hex){
@@ -732,7 +745,10 @@
     saveState();
   });
 
-  opponentInput.addEventListener("input", saveState);
+  opponentInput.addEventListener("input", ()=>{
+    saveState();
+    if(state.editingId) updateAddButtonLabel();
+  });
 
   // ---- Kickoff date/countdown ----
   function defaultKickoff(){
@@ -889,6 +905,7 @@
     loadGameSnapshot(game);
     updateAddButtonLabel();
     renderSeasonList();
+    $("matchupPanel").scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function exitEditMode(){
@@ -900,12 +917,18 @@
   function updateAddButtonLabel(){
     const addBtn = $("addToSeasonBtn");
     const cancelBtn = $("cancelEditBtn");
+    const banner = $("editingBanner");
     if(state.editingId){
       addBtn.textContent = "Save Changes";
       cancelBtn.style.display = "inline-block";
+      const t = TEAMS[state.teamIndex] || { name:"this team" };
+      const oppText = opponentInput.value || "TBD";
+      banner.textContent = `Editing: ${t.name} ${state.homeAway === "Away" ? "@" : "vs"} ${oppText} — change anything below, then tap Save Changes.`;
+      banner.style.display = "block";
     } else {
       addBtn.textContent = "Add This Game";
       cancelBtn.style.display = "none";
+      banner.style.display = "none";
     }
   }
 
