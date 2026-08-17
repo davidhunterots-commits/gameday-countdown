@@ -344,31 +344,6 @@
     border:1px solid rgba(255,255,255,0.15);
   }
 
-  .game-types{
-    display:flex;
-    flex-wrap:wrap;
-    gap:8px;
-  }
-  .gtype{
-    padding:8px 12px;
-    border-radius:999px;
-    border:1px solid var(--line);
-    background:var(--bg-digit);
-    color:var(--chalk-dim);
-    font-size:12px;
-    font-family:'Oswald',sans-serif;
-    text-transform:uppercase;
-    letter-spacing:0.06em;
-    cursor:pointer;
-    transition:all .2s ease;
-  }
-  .gtype.active{
-    background:var(--accent);
-    color:var(--accent-text);
-    border-color:var(--accent);
-    font-weight:600;
-  }
-
   .actions{
     display:flex;
     gap:10px;
@@ -627,22 +602,26 @@
       </div>
 
       <div class="subsection-divider"></div>
-      <h3 class="subheading">Home or Away</h3>
-      <div class="game-types" id="homeAwayTypes">
-        <button class="gtype" data-loc="Home">Home</button>
-        <button class="gtype" data-loc="Away">Away</button>
-      </div>
-
-      <div class="subsection-divider"></div>
-      <h3 class="subheading">Game Type</h3>
-      <div class="game-types" id="gameTypes">
-        <button class="gtype" data-type="Season Opener">Season Opener</button>
-        <button class="gtype" data-type="Non-Conference Game">Non-Conference</button>
-        <button class="gtype" data-type="Conference Game">Conference Game</button>
-        <button class="gtype" data-type="Rivalry Game">Rivalry Game</button>
-        <button class="gtype" data-type="Playoffs">Playoffs</button>
-        <button class="gtype" data-type="Bowl Game">Bowl Game</button>
-        <button class="gtype" data-type="Championship">Championship</button>
+      <div class="team-row">
+        <div class="field">
+          <label for="homeAwaySelect">Home or Away</label>
+          <select id="homeAwaySelect">
+            <option value="Home">Home</option>
+            <option value="Away">Away</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="gameTypeSelect">Game Type</label>
+          <select id="gameTypeSelect">
+            <option value="Season Opener">Season Opener</option>
+            <option value="Non-Conference Game">Non-Conference</option>
+            <option value="Conference Game">Conference Game</option>
+            <option value="Rivalry Game">Rivalry Game</option>
+            <option value="Playoffs">Playoffs</option>
+            <option value="Bowl Game">Bowl Game</option>
+            <option value="Championship">Championship</option>
+          </select>
+        </div>
       </div>
 
       <div class="subsection-divider"></div>
@@ -747,8 +726,8 @@
   const $ = id => document.getElementById(id);
   const teamSelect = $("teamSelect");
   const swapBtn = $("swapBtn");
-  const gameTypesWrap = $("gameTypes");
-  const homeAwayWrap = $("homeAwayTypes");
+  const gameTypeSelect = $("gameTypeSelect");
+  const homeAwaySelect = $("homeAwaySelect");
   const kickoffInput = $("kickoffInput");
   const opponentInput = $("opponentInput");
   const seasonListEl = $("seasonList");
@@ -879,20 +858,14 @@
     saveState();
   });
 
-  gameTypesWrap.addEventListener("click", (e)=>{
-    const btn = e.target.closest(".gtype");
-    if(!btn) return;
-    state.gameType = btn.dataset.type;
-    [...gameTypesWrap.children].forEach(b=>b.classList.toggle("active", b===btn));
+  gameTypeSelect.addEventListener("change", ()=>{
+    state.gameType = gameTypeSelect.value;
     applyTheme();
     saveState();
   });
 
-  homeAwayWrap.addEventListener("click", (e)=>{
-    const btn = e.target.closest(".gtype");
-    if(!btn) return;
-    state.homeAway = btn.dataset.loc;
-    [...homeAwayWrap.children].forEach(b=>b.classList.toggle("active", b===btn));
+  homeAwaySelect.addEventListener("change", ()=>{
+    state.homeAway = homeAwaySelect.value;
     applyTheme();
     saveState();
   });
@@ -1029,8 +1002,8 @@
 
     teamSelect.value = state.teamIndex;
     kickoffInput.value = toLocalInputValue(state.kickoff);
-    [...gameTypesWrap.children].forEach(b=>b.classList.toggle("active", b.dataset.type===state.gameType));
-    [...homeAwayWrap.children].forEach(b=>b.classList.toggle("active", b.dataset.loc===state.homeAway));
+    gameTypeSelect.value = state.gameType;
+    homeAwaySelect.value = state.homeAway;
     applyTheme();
     updateReadable();
     saveState();
@@ -1376,8 +1349,8 @@
     state.editingId = null;
     updateAddButtonLabel();
     teamSelect.value = state.teamIndex;
-    [...gameTypesWrap.children].forEach(b=>b.classList.toggle("active", b.dataset.type===state.gameType));
-    [...homeAwayWrap.children].forEach(b=>b.classList.toggle("active", b.dataset.loc===state.homeAway));
+    gameTypeSelect.value = state.gameType;
+    homeAwaySelect.value = state.homeAway;
     kickoffInput.value = toLocalInputValue(state.kickoff);
     applyTheme();
     updateReadable();
@@ -1426,8 +1399,8 @@
   if(!state.kickoff) state.kickoff = defaultKickoff();
   teamSelect.value = state.teamIndex;
   kickoffInput.value = toLocalInputValue(state.kickoff);
-  [...gameTypesWrap.children].forEach(b=>b.classList.toggle("active", b.dataset.type===state.gameType));
-  [...homeAwayWrap.children].forEach(b=>b.classList.toggle("active", b.dataset.loc===state.homeAway));
+  gameTypeSelect.value = state.gameType;
+  homeAwaySelect.value = state.homeAway;
   applyTheme();
   updateReadable();
   renderDeckSwitcher();
