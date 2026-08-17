@@ -430,6 +430,73 @@
     text-align:center;
     margin:-6px 0 14px;
   }
+  .toggle-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:12px;
+    color:var(--chalk-dim);
+    margin:0 0 14px;
+    cursor:pointer;
+  }
+  .toggle-row input[type="checkbox"]{
+    accent-color:var(--accent);
+    width:16px;
+    height:16px;
+    flex-shrink:0;
+    cursor:pointer;
+  }
+  .deck-switcher{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:12px;
+  }
+  .deck-arrow{
+    width:34px;
+    height:34px;
+    border-radius:50%;
+    border:1px solid var(--line);
+    background:var(--bg-digit);
+    color:var(--chalk);
+    font-size:18px;
+    line-height:1;
+    cursor:pointer;
+    flex-shrink:0;
+  }
+  .deck-arrow:active{background:var(--accent);color:#0B0D0F;}
+  .deck-name-input{
+    flex:1;
+    max-width:220px;
+    text-align:center;
+    background:transparent;
+    border:none;
+    border-bottom:1px dashed var(--line);
+    color:var(--chalk);
+    font-family:'Oswald',sans-serif;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    font-size:16px;
+    padding:6px 4px;
+  }
+  .deck-name-input:focus{outline:none;border-bottom-color:var(--accent);}
+  .deck-dots{
+    display:flex;
+    justify-content:center;
+    gap:6px;
+    margin:10px 0 0;
+  }
+  .deck-dot{
+    width:6px;
+    height:6px;
+    border-radius:50%;
+    background:var(--line);
+  }
+  .deck-dot.active{
+    background:var(--accent);
+    width:16px;
+    border-radius:3px;
+  }
   .import-status{
     font-size:11px;
     color:var(--chalk-dim);
@@ -538,9 +605,25 @@
     </div>
   </div>
 
-  <div class="panel">
+  <div class="panel" id="seasonPanel">
     <h2>Season Schedule</h2>
+
+    <div class="deck-switcher">
+      <button class="deck-arrow" id="deckPrevBtn" aria-label="Previous list">‹</button>
+      <input type="text" id="deckNameInput" class="deck-name-input" value="My Team" maxlength="30">
+      <button class="deck-arrow" id="deckNextBtn" aria-label="Next list">›</button>
+    </div>
+    <div class="deck-dots" id="deckDots"></div>
+    <div class="actions" style="margin-top:10px;margin-bottom:16px;">
+      <button class="btn" id="addDeckBtn">+ New List</button>
+      <button class="btn" id="removeDeckBtn">Remove This List</button>
+    </div>
+
     <p class="season-hint">Saved automatically on this device — no account needed.</p>
+    <label class="toggle-row" for="autoAdvanceToggle">
+      <input type="checkbox" id="autoAdvanceToggle" checked>
+      <span>Auto-advance to the next upcoming game</span>
+    </label>
     <ul class="season-list" id="seasonList"></ul>
     <p class="season-empty" id="seasonEmpty">No games saved yet. Set up a matchup above, then add it below.</p>
     <div class="actions" style="margin-top:14px;">
@@ -601,9 +684,22 @@
     gameType: "Rivalry Game",
     homeAway: "Home",
     kickoff: null,
-    season: [], // saved games: array of game snapshot objects, see snapshotCurrentGame()
-    editingId: null // id of the season game currently loaded for editing, if any
+    // Multiple named lists ("decks"), each holding its own saved games —
+    // e.g. one per team — so you can swipe between separate schedules
+    // without one import wiping out another.
+    decks: [{ id: "deck-1", name: "My Team", season: [] }],
+    activeDeckId: "deck-1",
+    editingId: null, // id of the season game currently loaded for editing, if any
+    autoAdvance: true // when true, the countdown always shows the soonest upcoming saved game
   };
+
+  function activeDeck(){
+    return state.decks.find(d => d.id === state.activeDeckId) || state.decks[0];
+  }
+
+  function makeDeckId(){
+    return crypto.randomUUID ? crypto.randomUUID() : ("deck-" + Date.now() + Math.random().toString(16).slice(2));
+  }
 
   const $ = id => document.getElementById(id);
   const teamSelect = $("teamSelect");
@@ -613,8 +709,12 @@
   const kickoffInput = $("kickoffInput");
   const opponentInput = $("opponentInput");
   const seasonListEl = $("seasonList");
+  const autoAdvanceToggle = $("autoAdvanceToggle");
   const seasonEmptyEl = $("seasonEmpty");
   const importStatusEl = $("importStatus");
+  const deckNameInput = $("deckNameInput");
+  const deckDotsEl = $("deckDots");
+  const seasonPanelEl = $("seasonPanel");
 
   // populate team dropdown
   TEAMS.forEach((t,i)=>{
@@ -816,9 +916,11 @@
   function persistToDevice(){
     try{
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        version: 1,
+        version: 2,
         currentGame: snapshotCurrentGame(),
-        season: state.season
+        decks: state.decks,
+        activeDeckId: state.activeDeckId,
+        autoAdvance: state.autoAdvance
       }));
     }catch(err){
       // Storage unavailable (private browsing, sandboxed preview, etc.) — ignore.
@@ -889,10 +991,55 @@
     saveState();
   }
 
+  // Picks whichever saved game has the soonest kickoff that hasn't happened
+  // yet. If every saved game is already in the past, falls back to the most
+  // recent one so the display isn't left empty.
+  function getNextUpcomingGameFrom(season){
+    if(!season || !season.length) return null;
+    const now = new Date();
+    const withDates = season.filter(g => g.kickoff);
+    const upcoming = withDates.filter(g => new Date(g.kickoff) > now)
+      .sort((a,b) => new Date(a.kickoff) - new Date(b.kickoff));
+    if(upcoming.length) return upcoming[0];
+    const past = withDates.sort((a,b) => new Date(b.kickoff) - new Date(a.kickoff));
+    return past.length ? past[0] : null;
+  }
+
+  function getNextUpcomingGame(){
+    return getNextUpcomingGameFrom(activeDeck().season);
+  }
+
+  // Switches the countdown to the next upcoming saved game, if auto-advance
+  // is on and that game isn't already what's showing. Safe to call
+  // repeatedly (e.g. on a timer) — it only updates the display when the
+  // soonest upcoming game has actually changed.
+  function advanceToNextGameIfNeeded(force){
+    if(!state.autoAdvance || !activeDeck().season.length) return;
+    if(state.editingId) return; // don't disrupt an in-progress edit
+    const next = getNextUpcomingGame();
+    if(!next) return;
+    const alreadyShowing =
+      state.teamIndex === next.teamIndex &&
+      (opponentInput.value || "") === (next.opponent || "") &&
+      state.kickoff && next.kickoff &&
+      state.kickoff.toISOString() === new Date(next.kickoff).toISOString();
+    if(alreadyShowing && !force) return;
+    loadGameSnapshot(next);
+  }
+
+  // Called when switching decks — always shows that deck's soonest
+  // upcoming game immediately, regardless of the auto-advance toggle,
+  // since switching decks is a deliberate "show me this team" action.
+  function showDeckHeadlineGame(){
+    const next = getNextUpcomingGame();
+    if(next) loadGameSnapshot(next);
+  }
+
   function renderSeasonList(){
+    const season = activeDeck().season;
     seasonListEl.innerHTML = "";
-    seasonEmptyEl.style.display = state.season.length ? "none" : "block";
-    state.season.forEach((game)=>{
+    seasonEmptyEl.style.display = season.length ? "none" : "block";
+    season.forEach((game)=>{
       const t = TEAMS[game.teamIndex] || { name:"Unknown" };
       const li = document.createElement("li");
       li.className = "season-item" + (state.editingId === game.id ? " editing" : "");
@@ -920,7 +1067,7 @@
       removeBtn.className = "remove-btn";
       removeBtn.textContent = "Remove";
       removeBtn.addEventListener("click", ()=>{
-        state.season = state.season.filter(g => g.id !== game.id);
+        activeDeck().season = activeDeck().season.filter(g => g.id !== game.id);
         if(state.editingId === game.id) exitEditMode();
         renderSeasonList();
         persistToDevice();
@@ -932,6 +1079,60 @@
       li.appendChild(actions);
       seasonListEl.appendChild(li);
     });
+  }
+
+  // ---- Deck switching (multiple named schedule lists) ----
+  function renderDeckSwitcher(){
+    const deck = activeDeck();
+    if(document.activeElement !== deckNameInput) deckNameInput.value = deck.name;
+    deckDotsEl.innerHTML = "";
+    state.decks.forEach(d=>{
+      const dot = document.createElement("span");
+      dot.className = "deck-dot" + (d.id === deck.id ? " active" : "");
+      deckDotsEl.appendChild(dot);
+    });
+    $("removeDeckBtn").disabled = state.decks.length <= 1;
+    $("removeDeckBtn").style.opacity = state.decks.length <= 1 ? "0.4" : "1";
+  }
+
+  function switchDeck(delta){
+    const idx = state.decks.findIndex(d => d.id === state.activeDeckId);
+    const newIdx = (idx + delta + state.decks.length) % state.decks.length;
+    state.activeDeckId = state.decks[newIdx].id;
+    state.editingId = null;
+    updateAddButtonLabel();
+    deckNameInput.blur(); // ensure the name field always reflects the newly active deck
+    renderDeckSwitcher();
+    renderSeasonList();
+    if(activeDeck().season.length) showDeckHeadlineGame();
+    persistToDevice();
+  }
+
+  function addDeck(){
+    const deck = { id: makeDeckId(), name: "New Team", season: [] };
+    state.decks.push(deck);
+    state.activeDeckId = deck.id;
+    state.editingId = null;
+    updateAddButtonLabel();
+    renderDeckSwitcher();
+    renderSeasonList();
+    persistToDevice();
+    deckNameInput.focus();
+    deckNameInput.select();
+  }
+
+  function removeDeck(){
+    if(state.decks.length <= 1) return;
+    const idx = state.decks.findIndex(d => d.id === state.activeDeckId);
+    state.decks.splice(idx, 1);
+    state.activeDeckId = state.decks[Math.max(0, idx - 1)].id;
+    state.editingId = null;
+    updateAddButtonLabel();
+    deckNameInput.blur();
+    renderDeckSwitcher();
+    renderSeasonList();
+    if(activeDeck().season.length) showDeckHeadlineGame();
+    persistToDevice();
   }
 
   // Loads a saved game back into the form above so its details can be
@@ -969,18 +1170,60 @@
     }
   }
 
+  autoAdvanceToggle.addEventListener("change", ()=>{
+    state.autoAdvance = autoAdvanceToggle.checked;
+    persistToDevice();
+    if(state.autoAdvance) advanceToNextGameIfNeeded(true);
+  });
+
+  $("deckPrevBtn").addEventListener("click", ()=> switchDeck(-1));
+  $("deckNextBtn").addEventListener("click", ()=> switchDeck(1));
+  $("addDeckBtn").addEventListener("click", addDeck);
+  $("removeDeckBtn").addEventListener("click", ()=>{
+    if(state.decks.length <= 1) return;
+    if(confirm(`Remove "${activeDeck().name}" and all its saved games? This can't be undone.`)){
+      removeDeck();
+    }
+  });
+  deckNameInput.addEventListener("change", ()=>{
+    activeDeck().name = deckNameInput.value.trim() || "My Team";
+    deckNameInput.value = activeDeck().name;
+    persistToDevice();
+  });
+
+  // Swipe left/right anywhere on the Season Schedule panel to switch decks.
+  // Only triggers on a clear horizontal swipe so normal scrolling and
+  // taps on buttons inside the panel keep working as usual.
+  (function enableDeckSwipe(){
+    let startX = null, startY = null;
+    seasonPanelEl.addEventListener("touchstart", (e)=>{
+      startX = e.changedTouches[0].clientX;
+      startY = e.changedTouches[0].clientY;
+    }, { passive: true });
+    seasonPanelEl.addEventListener("touchend", (e)=>{
+      if(startX === null) return;
+      const dx = e.changedTouches[0].clientX - startX;
+      const dy = e.changedTouches[0].clientY - startY;
+      startX = null; startY = null;
+      if(Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return; // not a horizontal swipe
+      if(state.decks.length < 2) return;
+      switchDeck(dx < 0 ? 1 : -1);
+    }, { passive: true });
+  })();
+
   $("addToSeasonBtn").addEventListener("click", ()=>{
     if(state.editingId){
-      const idx = state.season.findIndex(g => g.id === state.editingId);
+      const season = activeDeck().season;
+      const idx = season.findIndex(g => g.id === state.editingId);
       if(idx !== -1){
         const updated = snapshotCurrentGame();
         updated.id = state.editingId; // keep the same identity, just refresh its fields
-        state.season[idx] = updated;
+        season[idx] = updated;
       }
       exitEditMode();
       persistToDevice();
     } else {
-      state.season.push(snapshotCurrentGame());
+      activeDeck().season.push(snapshotCurrentGame());
       renderSeasonList();
       persistToDevice();
     }
@@ -995,15 +1238,17 @@
       app: "gameday-countdown",
       version: 1,
       exportedAt: new Date().toISOString(),
+      deckName: activeDeck().name,
       currentGame: snapshotCurrentGame(),
-      season: state.season
+      season: activeDeck().season
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     const stamp = new Date().toISOString().slice(0,10);
+    const slug = activeDeck().name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "season";
     a.href = url;
-    a.download = `gameday-countdown-season-${stamp}.json`;
+    a.download = `gameday-countdown-${slug}-${stamp}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1020,8 +1265,9 @@
       try{
         const data = JSON.parse(reader.result);
         if(!data || (!data.season && !data.currentGame)) throw new Error("Unrecognized file format");
+        let importedCount = 0;
         if(Array.isArray(data.season)){
-          state.season = data.season.map(g => ({
+          const imported = data.season.map(g => ({
             id: g.id || (crypto.randomUUID ? crypto.randomUUID() : ("g"+Date.now()+Math.random())),
             teamIndex: g.teamIndex ?? 0,
             swapped: !!g.swapped,
@@ -1030,13 +1276,22 @@
             gameType: g.gameType || "Conference Game",
             kickoff: g.kickoff || null
           }));
+          activeDeck().season = imported;
+          importedCount = imported.length;
+          // If the file has a name and this list hasn't been renamed from
+          // the default yet, adopt its name automatically.
+          if(data.deckName && (activeDeck().name === "My Team" || activeDeck().name === "New Team")){
+            activeDeck().name = data.deckName;
+            deckNameInput.value = activeDeck().name;
+          }
         }
         state.editingId = null;
         updateAddButtonLabel();
+        renderDeckSwitcher();
         renderSeasonList();
         if(data.currentGame) loadGameSnapshot(data.currentGame);
         persistToDevice();
-        importStatusEl.textContent = `Imported ${state.season.length} saved game${state.season.length===1?"":"s"}.`;
+        importStatusEl.textContent = `Imported ${importedCount} saved game${importedCount===1?"":"s"} into "${activeDeck().name}".`;
       }catch(err){
         importStatusEl.textContent = "Couldn't read that file — make sure it's a Gameday Countdown export.";
       }
@@ -1075,12 +1330,33 @@
   });
 
   // ---- init ----
-  // Restore the saved deck from this device first (season list, and the
-  // last active game if there's no share link telling us what to show).
+  // Restore the saved decks from this device first (season lists, auto-advance
+  // preference, and — unless auto-advance picks something — the last active game).
   const deviceData = loadFromDevice();
   if(deviceData){
-    if(Array.isArray(deviceData.season)) state.season = deviceData.season;
-    if(!location.hash && deviceData.currentGame){
+    if(Array.isArray(deviceData.decks) && deviceData.decks.length){
+      state.decks = deviceData.decks;
+      state.activeDeckId = (deviceData.activeDeckId && state.decks.some(d => d.id === deviceData.activeDeckId))
+        ? deviceData.activeDeckId
+        : state.decks[0].id;
+    } else if(Array.isArray(deviceData.season)){
+      // Migrating from the earlier single-list version — keep those games
+      // as the first deck instead of losing them.
+      const migratedId = makeDeckId();
+      state.decks = [{ id: migratedId, name: "My Team", season: deviceData.season }];
+      state.activeDeckId = migratedId;
+    }
+    if(typeof deviceData.autoAdvance === "boolean") state.autoAdvance = deviceData.autoAdvance;
+  }
+  autoAdvanceToggle.checked = state.autoAdvance;
+
+  const hasShareLink = !!location.hash;
+  loadState(); // a shared link's URL hash always overrides the current game
+
+  if(!hasShareLink){
+    if(state.autoAdvance && activeDeck().season.length){
+      advanceToNextGameIfNeeded(true);
+    } else if(deviceData && deviceData.currentGame){
       const g = deviceData.currentGame;
       state.teamIndex = g.teamIndex ?? state.teamIndex;
       state.swapped = !!g.swapped;
@@ -1090,7 +1366,7 @@
       state.kickoff = g.kickoff ? new Date(g.kickoff) : null;
     }
   }
-  loadState(); // a shared link's URL hash overrides the current game, if present
+
   if(!state.kickoff) state.kickoff = defaultKickoff();
   teamSelect.value = state.teamIndex;
   kickoffInput.value = toLocalInputValue(state.kickoff);
@@ -1098,9 +1374,13 @@
   [...homeAwayWrap.children].forEach(b=>b.classList.toggle("active", b.dataset.loc===state.homeAway));
   applyTheme();
   updateReadable();
+  renderDeckSwitcher();
   renderSeasonList();
   tick();
   setInterval(tick, 1000);
+  // Re-check every 30s so the display moves itself to the next game once
+  // the current one's kickoff passes, without needing a page reload.
+  setInterval(()=> advanceToNextGameIfNeeded(false), 30000);
 })();
 </script>
 
