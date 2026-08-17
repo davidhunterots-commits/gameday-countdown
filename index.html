@@ -424,6 +424,12 @@
     text-align:center;
     margin:4px 0 0;
   }
+  .season-hint{
+    font-size:11px;
+    color:var(--chalk-dim);
+    text-align:center;
+    margin:-6px 0 14px;
+  }
   .import-status{
     font-size:11px;
     color:var(--chalk-dim);
@@ -534,10 +540,11 @@
 
   <div class="panel">
     <h2>Season Schedule</h2>
+    <p class="season-hint">Saved automatically on this device — no account needed.</p>
     <ul class="season-list" id="seasonList"></ul>
     <p class="season-empty" id="seasonEmpty">No games saved yet. Set up a matchup above, then add it below.</p>
     <div class="actions" style="margin-top:14px;">
-      <button class="btn" id="addToSeasonBtn">Add This Game</button>
+      <button class="btn" id="addToSeasonBtn">Save This Game</button>
       <button class="btn" id="cancelEditBtn" style="display:none;">Cancel</button>
     </div>
     <div class="actions" style="margin-top:10px;">
@@ -799,6 +806,34 @@
     $("d-secs").textContent = String(secs).padStart(2,"0");
   }
 
+  // ---- On-device storage (same idea as Countdown Chameleon's "deck") ----
+  // Saves quietly to the browser's local storage so the season list and
+  // current game survive a refresh or app relaunch, with no account needed.
+  // Wrapped in try/catch: some sandboxed previews block this API entirely,
+  // in which case the app just falls back to in-memory only for that session.
+  const STORAGE_KEY = "gamedayCountdownData";
+
+  function persistToDevice(){
+    try{
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        version: 1,
+        currentGame: snapshotCurrentGame(),
+        season: state.season
+      }));
+    }catch(err){
+      // Storage unavailable (private browsing, sandboxed preview, etc.) — ignore.
+    }
+  }
+
+  function loadFromDevice(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    }catch(err){
+      return null;
+    }
+  }
+
   // ---- Share / persistence via URL hash ----
   function saveState(){
     const params = new URLSearchParams();
@@ -809,6 +844,7 @@
     params.set("opp", opponentInput.value || "");
     params.set("ko", state.kickoff ? state.kickoff.toISOString() : "");
     history.replaceState(null, "", "#" + params.toString());
+    persistToDevice();
   }
 
   function loadState(){
@@ -887,6 +923,7 @@
         state.season = state.season.filter(g => g.id !== game.id);
         if(state.editingId === game.id) exitEditMode();
         renderSeasonList();
+        persistToDevice();
       });
       actions.appendChild(editBtn);
       actions.appendChild(removeBtn);
@@ -899,7 +936,7 @@
 
   // Loads a saved game back into the form above so its details can be
   // changed, and remembers which saved game is being edited so the
-  // "Add This Game" button updates it in place instead of duplicating it.
+  // "Save This Game" button updates it in place instead of duplicating it.
   function enterEditMode(game){
     state.editingId = game.id;
     loadGameSnapshot(game);
@@ -926,7 +963,7 @@
       banner.textContent = `Editing: ${t.name} ${state.homeAway === "Away" ? "@" : "vs"} ${oppText} — change anything below, then tap Save Changes.`;
       banner.style.display = "block";
     } else {
-      addBtn.textContent = "Add This Game";
+      addBtn.textContent = "Save This Game";
       cancelBtn.style.display = "none";
       banner.style.display = "none";
     }
@@ -941,9 +978,11 @@
         state.season[idx] = updated;
       }
       exitEditMode();
+      persistToDevice();
     } else {
       state.season.push(snapshotCurrentGame());
       renderSeasonList();
+      persistToDevice();
     }
   });
 
@@ -996,6 +1035,7 @@
         updateAddButtonLabel();
         renderSeasonList();
         if(data.currentGame) loadGameSnapshot(data.currentGame);
+        persistToDevice();
         importStatusEl.textContent = `Imported ${state.season.length} saved game${state.season.length===1?"":"s"}.`;
       }catch(err){
         importStatusEl.textContent = "Couldn't read that file — make sure it's a Gameday Countdown export.";
@@ -1035,7 +1075,22 @@
   });
 
   // ---- init ----
-  loadState();
+  // Restore the saved deck from this device first (season list, and the
+  // last active game if there's no share link telling us what to show).
+  const deviceData = loadFromDevice();
+  if(deviceData){
+    if(Array.isArray(deviceData.season)) state.season = deviceData.season;
+    if(!location.hash && deviceData.currentGame){
+      const g = deviceData.currentGame;
+      state.teamIndex = g.teamIndex ?? state.teamIndex;
+      state.swapped = !!g.swapped;
+      state.homeAway = g.homeAway === "Away" ? "Away" : "Home";
+      state.gameType = g.gameType || state.gameType;
+      opponentInput.value = g.opponent || "";
+      state.kickoff = g.kickoff ? new Date(g.kickoff) : null;
+    }
+  }
+  loadState(); // a shared link's URL hash overrides the current game, if present
   if(!state.kickoff) state.kickoff = defaultKickoff();
   teamSelect.value = state.teamIndex;
   kickoffInput.value = toLocalInputValue(state.kickoff);
