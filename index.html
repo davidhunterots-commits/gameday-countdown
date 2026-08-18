@@ -288,6 +288,35 @@
     gap:14px;
     position:relative;
   }
+  .schedule-label{
+    font-family:'Oswald',sans-serif;
+    text-transform:uppercase;
+    letter-spacing:0.12em;
+    font-size:11px;
+    color:var(--chalk-dim);
+    text-align:center;
+    margin:0 0 -4px;
+  }
+  .days-hero-row{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:14px;
+  }
+  .schedule-arrow{
+    width:32px;
+    height:32px;
+    border-radius:50%;
+    border:1px solid var(--line);
+    background:var(--bg-digit);
+    color:var(--chalk);
+    font-size:17px;
+    line-height:1;
+    padding:0;
+    cursor:pointer;
+    flex-shrink:0;
+  }
+  .schedule-arrow:active{background:var(--accent);color:var(--accent-text);border-color:var(--accent);}
   .days-hero{
     text-align:center;
   }
@@ -570,6 +599,14 @@
     text-align:center;
     margin:-6px 0 14px;
   }
+  .save-colors-hint{
+    font-size:11px;
+    color:var(--accent);
+    text-align:center;
+    margin:8px 0 0;
+    min-height:14px;
+    font-weight:600;
+  }
   .toggle-row{
     display:flex;
     align-items:center;
@@ -693,9 +730,14 @@
 
       <div id="countdownArea">
         <div class="digits" id="digits">
-          <div class="days-hero">
-            <div class="digit-val days-val" id="d-days">00</div>
-            <div class="digit-label days-label">Days</div>
+          <p class="schedule-label" id="countdownScheduleLabel">My Team</p>
+          <div class="days-hero-row">
+            <button class="schedule-arrow" id="schedulePrevBtn" aria-label="Previous schedule">‹</button>
+            <div class="days-hero">
+              <div class="digit-val days-val" id="d-days">00</div>
+              <div class="digit-label days-label">Days</div>
+            </div>
+            <button class="schedule-arrow" id="scheduleNextBtn" aria-label="Next schedule">›</button>
           </div>
           <div class="digits-sub">
             <div class="digit-block sub"><div class="digit-val" id="d-hours">00</div><div class="digit-label">Hrs</div></div>
@@ -731,6 +773,10 @@
         <div class="swatch" id="swatchA"></div>
         <div class="swatch" id="swatchB"></div>
       </div>
+      <div class="actions" style="margin-top:12px;">
+        <button class="btn" id="saveColorsBtn">Save Colors</button>
+      </div>
+      <p class="save-colors-hint" id="saveColorsHint"></p>
 
       <div class="subsection-divider"></div>
       <div class="team-row">
@@ -870,7 +916,8 @@
     decks: [{ id: "deck-1", name: "My Team", season: [] }],
     activeDeckId: "deck-1",
     editingId: null, // id of the season game currently loaded for editing, if any
-    autoAdvance: true // when true, the countdown always shows the soonest upcoming saved game
+    autoAdvance: true, // when true, the countdown always shows the soonest upcoming saved game
+    teamSwapPrefs: {} // remembers each team's last-chosen color order (by team index), so browsing back to a team keeps its swap choice
   };
 
   function activeDeck(){
@@ -963,6 +1010,17 @@
     return `rgb(${r},${g},${bl})`;
   }
 
+  // Same blend, but returns a hex string — needed anywhere downstream code
+  // (like hexToRgba for the digit glow) expects strict "#rrggbb" input.
+  function mixHex(hexA, hexB, t){
+    const a = hexToRgbArr(hexA), b = hexToRgbArr(hexB);
+    const toHex = v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0");
+    const r = a[0] + (b[0]-a[0])*t;
+    const g = a[1] + (b[1]-a[1])*t;
+    const bl = a[2] + (b[2]-a[2])*t;
+    return `#${toHex(r)}${toHex(g)}${toHex(bl)}`.toUpperCase();
+  }
+
   // Build the page's outer background as the literal, full-strength team
   // color (primary, or secondary once swapped) — not a darkened tint.
   // The scoreboard/panels stay fixed dark cards on top of it.
@@ -991,28 +1049,83 @@
     return 0.2126*lin(r) + 0.7152*lin(g) + 0.0722*lin(b);
   }
 
-  const DARK_FLOOR = 0.06; // colors below this read as "invisible" on the dark UI
+  const DARK_FLOOR = 0.012; // colors below this read as "invisible" on the dark UI — set just above pure #000000 (luminance 0), which is the only real problem case; every other team's dark color (navy, forest green, maroon, etc.) sits well above this
 
-  // Pick whichever team color will actually be visible for on-screen
-  // accents (header text, glow, buttons). Falls back to chalk white
-  // if both team colors are too dark to show up.
+  // Lightens a too-dark color just enough to read clearly against the dark
+  // UI, by blending it toward white in small steps — used when the
+  // secondary color itself is too dark (e.g. pure black) to show up well
+  // as a button fill or glow.
+  function lightenForAccent(hex){
+    let result = hex;
+    let t = 0;
+    while(luminance(result) < DARK_FLOOR + 0.12 && t < 0.9){
+      t += 0.12;
+      result = mixHex(hex, "#FFFFFF", t);
+    }
+    return result;
+  }
+
+  // The page background is always drawn from the team's primary color (see
+  // applyTheme below), so accents/buttons are always built from the
+  // *secondary* color instead — never primary. That guarantees the accent
+  // can never match the background, for any team, in any swap state,
+  // without needing special-case logic for white or any other color.
   function pickAccent(primary, secondary){
-    if(luminance(primary) >= DARK_FLOOR) return primary;
     if(luminance(secondary) >= DARK_FLOOR) return secondary;
-    return "#F5F3EE";
+    return lightenForAccent(secondary); // secondary's too dark (e.g. pure black) — lighten instead of matching bg
   }
 
   teamSelect.addEventListener("change", ()=>{
     state.teamIndex = parseInt(teamSelect.value, 10);
-    state.swapped = false;
+    state.swapped = !!state.teamSwapPrefs[state.teamIndex];
     applyTheme();
     saveState();
   });
+
+  // Step to the previous/next saved schedule (deck). Reuses the same
+  // switchDeck() used by the Season Schedule tab's own arrows, so browsing
+  // from here stays perfectly in sync with that tab.
+  $("schedulePrevBtn").addEventListener("click", ()=> switchDeck(-1));
+  $("scheduleNextBtn").addEventListener("click", ()=> switchDeck(1));
+
+  // Swipe left/right anywhere on the scoreboard to browse schedules —
+  // mirrors the deck-switcher swipe already on the Season Schedule tab.
+  // Only fires on a clear horizontal swipe so tapping the opponent field or
+  // the team name to open its picker still works normally.
+  (function enableScheduleSwipe(){
+    let startX = null, startY = null;
+    const board = $("scoreboard");
+    board.addEventListener("touchstart", (e)=>{
+      startX = e.changedTouches[0].clientX;
+      startY = e.changedTouches[0].clientY;
+    }, { passive: true });
+    board.addEventListener("touchend", (e)=>{
+      if(startX === null) return;
+      const dx = e.changedTouches[0].clientX - startX;
+      const dy = e.changedTouches[0].clientY - startY;
+      startX = null; startY = null;
+      if(Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return; // not a horizontal swipe
+      if(state.decks.length < 2) return;
+      switchDeck(dx < 0 ? 1 : -1);
+    }, { passive: true });
+  })();
 
   swapBtn.addEventListener("click", ()=>{
     state.swapped = !state.swapped;
     applyTheme();
     saveState();
+    // a new color choice hasn't been saved as this team's default yet —
+    // clear any leftover "Saved!" message from a previous save
+    $("saveColorsHint").textContent = "";
+  });
+
+  $("saveColorsBtn").addEventListener("click", ()=>{
+    state.teamSwapPrefs[state.teamIndex] = state.swapped;
+    persistToDevice();
+    const hint = $("saveColorsHint");
+    hint.textContent = `Saved! ${TEAMS[state.teamIndex].name} will default to these colors from now on.`;
+    clearTimeout(hint._clearTimer);
+    hint._clearTimer = setTimeout(()=>{ hint.textContent = ""; }, 3000);
   });
 
   gameTypeSelect.addEventListener("change", ()=>{
@@ -1089,7 +1202,8 @@
         currentGame: snapshotCurrentGame(),
         decks: state.decks,
         activeDeckId: state.activeDeckId,
-        autoAdvance: state.autoAdvance
+        autoAdvance: state.autoAdvance,
+        teamSwapPrefs: state.teamSwapPrefs
       }));
     }catch(err){
       // Storage unavailable (private browsing, sandboxed preview, etc.) — ignore.
@@ -1261,6 +1375,8 @@
     });
     $("removeDeckBtn").disabled = state.decks.length <= 1;
     $("removeDeckBtn").style.opacity = state.decks.length <= 1 ? "0.4" : "1";
+    const countdownLabel = $("countdownScheduleLabel");
+    if(countdownLabel) countdownLabel.textContent = deck.name;
   }
 
   function switchDeck(delta){
@@ -1612,6 +1728,7 @@
       state.activeDeckId = migratedId;
     }
     if(typeof deviceData.autoAdvance === "boolean") state.autoAdvance = deviceData.autoAdvance;
+    if(deviceData.teamSwapPrefs && typeof deviceData.teamSwapPrefs === "object") state.teamSwapPrefs = deviceData.teamSwapPrefs;
   }
   autoAdvanceToggle.checked = state.autoAdvance;
 
