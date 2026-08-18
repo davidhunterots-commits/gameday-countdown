@@ -95,8 +95,10 @@
     display:inline-flex;
     align-items:center;
     padding:10px 0;
-    animation: ticker-scroll 55s linear infinite;
     will-change: transform;
+  }
+  .score-ticker-track.scrolling{
+    animation: ticker-scroll 55s linear infinite;
   }
   @keyframes ticker-scroll{
     from{ transform:translateX(0); }
@@ -126,14 +128,8 @@
     0%,100%{ opacity:1; }
     50%{ opacity:0.35; }
   }
-  .ticker-empty{
-    padding:11px 16px;
-    font-size:12px;
-    font-family:'Oswald',sans-serif;
-    letter-spacing:0.03em;
-    text-transform:uppercase;
-    color:var(--chalk-dim);
-    text-align:center;
+  .ticker-empty-item{
+    border-right:none !important;
   }
   .subsection-divider{
     height:1px;
@@ -1555,11 +1551,33 @@
     }).join("");
     // duplicated once so the marquee loop has no visible seam
     track.innerHTML = pieces + pieces;
+    // only start the scroll once there's real, duplicated content behind it —
+    // otherwise a single short item scrolls off with nothing to replace it
+    track.classList.add("scrolling");
+
+    // Scroll at a constant reading speed rather than a fixed duration —
+    // otherwise a long list of games (e.g. during preseason, when the
+    // endpoint returns many low-profile games) whips by far too fast, since
+    // the same 55s would have to cover a lot more distance.
+    const PIXELS_PER_SECOND = 65;
+    const MIN_DURATION_S = 20;
+    requestAnimationFrame(()=>{
+      const singleCopyWidth = track.scrollWidth / 2; // scrollWidth covers both duplicated copies
+      const duration = Math.max(MIN_DURATION_S, singleCopyWidth / PIXELS_PER_SECOND);
+      track.style.animationDuration = `${duration}s`;
+    });
   }
 
   function renderTickerEmpty(){
-    const wrap = $("scoreTicker");
-    if(wrap) wrap.innerHTML = `<p class="ticker-empty">Scores unavailable right now.</p>`;
+    // Update the track in place (don't replace #scoreTicker's contents
+    // outright) so the track element still exists for a later successful
+    // refresh to render into — otherwise one failed fetch would permanently
+    // break every refresh after it.
+    const track = $("scoreTickerTrack");
+    if(!track) return;
+    track.classList.remove("scrolling");
+    track.style.animationDuration = "";
+    track.innerHTML = `<span class="ticker-item ticker-empty-item">Scores unavailable right now.</span>`;
   }
 
   async function loadScoreTicker(){
