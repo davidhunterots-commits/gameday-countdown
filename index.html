@@ -1121,11 +1121,31 @@
 
   $("saveColorsBtn").addEventListener("click", ()=>{
     state.teamSwapPrefs[state.teamIndex] = state.swapped;
+
+    // Also update every already-saved game for this team, across every
+    // schedule — not just the default used for future fresh picks.
+    // Otherwise auto-advance keeps showing each saved game's own older
+    // color choice, and the save looks like it didn't stick.
+    let updatedCount = 0;
+    state.decks.forEach(deck => {
+      deck.season.forEach(game => {
+        if(game.teamIndex === state.teamIndex && game.swapped !== state.swapped){
+          game.swapped = state.swapped;
+          updatedCount++;
+        }
+      });
+    });
+
     persistToDevice();
+    renderSeasonList();
+
     const hint = $("saveColorsHint");
-    hint.textContent = `Saved! ${TEAMS[state.teamIndex].name} will default to these colors from now on.`;
+    const teamName = TEAMS[state.teamIndex].name;
+    hint.textContent = updatedCount > 0
+      ? `Saved! Updated ${teamName}'s colors on ${updatedCount} saved game${updatedCount === 1 ? "" : "s"} too.`
+      : `Saved! ${teamName} will default to these colors from now on.`;
     clearTimeout(hint._clearTimer);
-    hint._clearTimer = setTimeout(()=>{ hint.textContent = ""; }, 3000);
+    hint._clearTimer = setTimeout(()=>{ hint.textContent = ""; }, 3500);
   });
 
   gameTypeSelect.addEventListener("change", ()=>{
